@@ -1,12 +1,21 @@
+import random
 from machine import Pin, I2C
 import neopixel
 import time
+import math
 import ssd1306
 import am2320
 from ds3231_port import DS3231
 import uasyncio as asyncio
+import colorsys
 
-from led_strip_effects import led_cleanup_effect, led_effect_1, rainbowCycle, week_day_routine_effect
+from effects.led_strip_effects import (
+    led_cleanup_effect,
+    led_effect_1,
+    rainbowCycle,
+    week_day_routine_effect,
+)
+from effects import flakes
 
 i2c = I2C(1, sda=Pin(21), scl=Pin(22), freq=100000)
 display = ssd1306.SSD1306_I2C(128, 64, i2c, 0x3C)
@@ -20,7 +29,7 @@ D33 = Pin(33, Pin.IN, Pin.PULL_UP)
 np = neopixel.NeoPixel(D27, 30)
 np.fill((0, 0, 0))
 np.write()
-print('init done')
+print("init done")
 
 
 def fill_all(*args):
@@ -30,8 +39,8 @@ def fill_all(*args):
 
 def draw_layout():
     display.fill(0)
-    display.text('HUMIDITY:', 0, 24, 3)
-    display.text('TEMP:', 0, 24+12, 1)
+    display.text("HUMIDITY:", 0, 24, 3)
+    display.text("TEMP:", 0, 24 + 12, 1)
 
 
 async def udpate_humidity():
@@ -45,14 +54,13 @@ async def udpate_humidity():
 
 def udpate_time():
     a = ds3231.get_time()
-    display.text('                ', 0, 12*4, 1)
-    display.text(
-        f'{a[2]:02}.{a[1]:02}   {a[3]:02}:{a[4]:02}:{a[5]:02}', 0, 12*4, 1)
+    display.text("                ", 0, 12 * 4, 1)
+    display.text(f"{a[2]:02}.{a[1]:02}   {a[3]:02}:{a[4]:02}:{a[5]:02}", 0, 12 * 4, 1)
 
 
 def update_sensor_data():
-    display.text(f'{sensor.humidity():.3} %', 80, 12*2, 1)
-    display.text(f'{sensor.temperature():.3} C', 80, 12*3, 1)
+    display.text(f"{sensor.humidity():.3} %", 80, 12 * 2, 1)
+    display.text(f"{sensor.temperature():.3} C", 80, 12 * 3, 1)
 
 
 async def update_display():
@@ -61,11 +69,24 @@ async def update_display():
         draw_layout()
         udpate_time()
         update_sensor_data()
-        display.text(f'LED EFFECT: {LED_EFFECT}', 0, 12*1, 1)
+        display.text(f"LED EFFECT: {LED_EFFECT}", 0, 12 * 1, 1)
         display.show()
         await asyncio.sleep_ms(1000)
 
-LED_EFFECT = 0
+
+LED_EFFECT = 1
+
+
+async def np_update():
+    while True:
+        if LED_EFFECT > 0:
+            np.write()
+        await asyncio.sleep_ms(10)
+
+
+async def flake_task():
+    while LED_EFFECT == 1:
+        await flakes.flake_effect(np, loop)
 
 
 async def update_led_strip():
@@ -73,12 +94,15 @@ async def update_led_strip():
     while True:
         if LED_EFFECT == 0:
             await led_cleanup_effect(np)
+            await asyncio.sleep_ms(100)
         elif LED_EFFECT == 1:
-            await led_effect_1(np)
-        elif LED_EFFECT == 2:
-            await rainbowCycle(np)
-        elif LED_EFFECT == 3:
-            await week_day_routine_effect(np, ds3231)
+            await flake_task()
+        #     await led_effect_1(np)
+        # elif LED_EFFECT == 2:
+        #     await rainbowCycle(np)
+        # elif LED_EFFECT == 3:
+        #     await week_day_routine_effect(np, ds3231)
+        # else:
 
 
 async def poll_button():
@@ -86,7 +110,7 @@ async def poll_button():
         if D33.value() == 0:
             global LED_EFFECT
             LED_EFFECT += 1
-            if LED_EFFECT > 3:  # max number of led strip effect
+            if LED_EFFECT > 1:  # max number of led strip effect
                 LED_EFFECT = 0
             await asyncio.sleep_ms(500)
         await asyncio.sleep_ms(100)
@@ -95,6 +119,7 @@ async def poll_button():
 loop = asyncio.new_event_loop()
 loop.create_task(update_display())
 loop.create_task(update_led_strip())
+loop.create_task(np_update())
 loop.create_task(poll_button())
 loop.create_task(udpate_humidity())
 loop.run_forever()
